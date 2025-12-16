@@ -1,9 +1,10 @@
-replicaCount: 2
-
-service:
-  type: LoadBalancer
-  port: 80
+replicaCount: 1
 
 image:
   repository: nginx
   tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+  port: 80

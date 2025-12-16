@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   environment {
-    KUBECONFIG = "$HOME/.kube/config"
+    KUBECONFIG = credentials('kubeconfig')
     ARGOCD_NAMESPACE = "argocd"
     APP_NAMESPACE = "nginx"
     GITOPS_REPO = "https://github.com/arunprakash432/simple-helm-nginx-jenkins-project.git"
@@ -14,13 +14,13 @@ pipeline {
       steps {
         sh '''
           if ! command -v helm >/dev/null; then
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            curl -sSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           fi
         '''
       }
     }
 
-    stage('Install ArgoCD') {
+    stage('Install Argo CD') {
       steps {
         sh '''
           kubectl create namespace ${ARGOCD_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
@@ -31,24 +31,15 @@ pipeline {
           helm upgrade --install argocd argo/argo-cd \
             --namespace ${ARGOCD_NAMESPACE} \
             --set server.service.type=LoadBalancer \
+            --set configs.cm.admin\\.enabled=false \
             --wait
+
+          kubectl wait --for=condition=Established crd/applications.argoproj.io --timeout=120s
         '''
       }
     }
 
-    stage('Install ArgoCD CLI') {
-      steps {
-        sh '''
-          if ! command -v argocd >/dev/null; then
-            curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-            chmod +x argocd
-            sudo mv argocd /usr/local/bin/
-          fi
-        '''
-      }
-    }
-
-    stage('Deploy NGINX App via ArgoCD') {
+    stage('Deploy NGINX via Argo CD (Helm)') {
       steps {
         sh '''
           kubectl create namespace ${APP_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
@@ -65,6 +56,10 @@ pipeline {
               repoURL: ${GITOPS_REPO}
               targetRevision: HEAD
               path: nginx
+              helm:
+                releaseName: nginx
+                valueFiles:
+                  - values.yaml
             destination:
               server: https://kubernetes.default.svc
               namespace: ${APP_NAMESPACE}
@@ -81,13 +76,13 @@ pipeline {
   post {
     success {
       sh '''
-        echo "NGINX Deployment Complete"
+        echo "=============================="
+        echo " NGINX DEPLOYMENT SUCCESSFUL "
+        echo "=============================="
 
-        echo "NGINX Service:"
-        kubectl get svc -n ${APP_NAMESPACE}
-
-        echo "ArgoCD Service:"
-        kubectl get svc -n ${ARGOCD_NAMESPACE}
+        kubectl get pods -n ${APP_NAMESPACE}
+        kubectl get svc  -n ${APP_NAMESPACE}
+        kubectl get svc  -n ${ARGOCD_NAMESPACE}
       '''
     }
   }
